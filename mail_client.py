@@ -7,6 +7,24 @@ from typing import Optional, List, Any
 
 import pandas as pd
 
+# Folder options per provider. Keys are display labels shown in the UI,
+# values are the IMAP folder names sent to the server.
+# Yahoo's "Archive" is a user-facing archive folder (explicitly archived emails only).
+# Gmail's "All Mail" contains everything: inbox, archived, sent, etc.
+SCAN_FOLDERS = {
+    "gmail.com": {
+        "Inbox": "INBOX",
+        "All Mail": "[Gmail]/All Mail",
+    },
+    "yahoo.com": {
+        "Inbox": "INBOX",
+        "Archive": "Archive",
+    },
+}
+
+# Fallback for unsupported providers — inbox only
+DEFAULT_FOLDERS = {"Inbox": "INBOX"}
+
 
 class MailAnalyzer:
     def __init__(self, email_address, app_password):
@@ -56,6 +74,13 @@ class MailAnalyzer:
             return endpoints[domain]
         else:
             raise ValueError(f"Unsupported email domain: {domain}")
+        
+    @staticmethod
+    def __imap_folder_name(folder: str) -> str:
+        """Wrap folder name in quotes if it contains spaces or special chars."""
+        if " " in folder or "/" in folder:
+            return f'"{folder}"'
+        return folder
 
     def connect(self) -> imaplib.IMAP4_SSL:
         """Create a fresh IMAP connection"""
@@ -68,11 +93,16 @@ class MailAnalyzer:
         """Split an array into chunks of a specified size."""
         return [array[i : i + chunk_size] for i in range(0, len(array), chunk_size)]
 
-    def get_sender_statistics(self, progress_callback=None) -> pd.DataFrame:
-        """Analyze recent emails and return a DataFrame with sender information"""
+    def get_sender_statistics(
+        self, progress_callback=None, folder: str = "INBOX"
+    ) -> pd.DataFrame:
+        """Analyze emails in the given folder and return a DataFrame with sender information"""
         mail = self.connect()
 
-        mail.select("INBOX")
+        result, _ = mail.select(self.__imap_folder_name(folder))
+        if result != "OK":
+            raise Exception(f"Could not select folder: {folder}")
+
         _, messages = mail.uid("search", None, "ALL")
 
         message_ids = messages[0].split()
@@ -87,8 +117,10 @@ class MailAnalyzer:
                 processed_messages += len(batch_ids)
                 progress_callback(processed_messages, total_messages)
 
+            # BODY.PEEK[] fetches full message content without marking emails as
+            # read — RFC822 would implicitly set the \Seen flag on every message.
             _, msg_data = mail.uid(
-                "fetch", ",".join([el.decode() for el in batch_ids]), "(RFC822)"
+                "fetch", ",".join([el.decode() for el in batch_ids]), "(BODY.PEEK[])"
             )
 
             for response_part in msg_data:
@@ -155,10 +187,13 @@ class MailAnalyzer:
         except Exception as e:
             return None
 
-    def delete_emails_from_sender(self, sender_email) -> int:
+    def delete_emails_from_sender(self, sender_email, folder: str = "INBOX") -> int:
         mail = self.connect()
 
-        mail.select("INBOX", readonly=False)
+        result, _ = mail.select(self.__imap_folder_name(folder), readonly=False)
+        if result != "OK":
+            raise Exception(f"Could not select folder: {folder}")
+
         _, messages = mail.uid("SEARCH", None, f'FROM "{sender_email}"')
         if not messages[0]:
             mail.logout()
