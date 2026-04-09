@@ -117,10 +117,11 @@ class MailAnalyzer:
                 processed_messages += len(batch_ids)
                 progress_callback(processed_messages, total_messages)
 
-            # BODY.PEEK[] fetches full message content without marking emails as
+            # BODY.PEEK[] fetches message content without marking emails as
             # read — RFC822 would implicitly set the \Seen flag on every message.
+            # Although, to speed upscanning I am only looking at headers.
             _, msg_data = mail.uid(
-                "fetch", ",".join([el.decode() for el in batch_ids]), "(BODY.PEEK[])"
+                "fetch", ",".join([el.decode() for el in batch_ids]), "(BODY.PEEK[HEADER.FIELDS (FROM LIST-UNSUBSCRIBE)])"
             )
 
             for response_part in msg_data:

@@ -17,6 +17,14 @@ def get_selected_imap_folder() -> str:
 
 
 def analyze_emails_component(analyzer):
+    folder_options = list(get_folder_options().keys())
+    st.session_state.scan_folder = st.selectbox(       # st. not st.sidebar.
+        "Folder to scan",
+        options=folder_options,
+        index=folder_options.index(st.session_state.scan_folder)
+        if st.session_state.scan_folder in folder_options
+        else 0,
+    )
     if st.button("Analyze Emails"):
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -163,16 +171,6 @@ def sidebar_component():
                         st.session_state.email_data = None
                         st.success("Successfully connected!")
                         st.rerun()
-
-        st.sidebar.header("Scan Options")
-        folder_options = list(get_folder_options().keys())
-        st.session_state.scan_folder = st.sidebar.selectbox(
-            "Folder to scan",
-            options=folder_options,
-            index=folder_options.index(st.session_state.scan_folder)
-            if st.session_state.scan_folder in folder_options
-            else 0,
-        )
 
         # Add a button to star the repository
         st.sidebar.markdown(
