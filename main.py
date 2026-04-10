@@ -1,10 +1,30 @@
 import math
 
 import streamlit as st
-from mail_client import MailAnalyzer
+from mail_client import MailAnalyzer, SCAN_FOLDERS, DEFAULT_FOLDERS
+
+
+def get_folder_options() -> dict:
+    """Return the folder options dict for the current user's email provider."""
+    domain = st.session_state.get("domain")
+    return SCAN_FOLDERS.get(domain, DEFAULT_FOLDERS)
+
+
+def get_selected_imap_folder() -> str:
+    """Resolve the selected display label to its IMAP folder name."""
+    folder_options = get_folder_options()
+    return folder_options.get(st.session_state.scan_folder, "INBOX")
 
 
 def analyze_emails_component(analyzer):
+    folder_options = list(get_folder_options().keys())
+    st.session_state.scan_folder = st.selectbox(       # st. not st.sidebar.
+        "Folder to scan",
+        options=folder_options,
+        index=folder_options.index(st.session_state.scan_folder)
+        if st.session_state.scan_folder in folder_options
+        else 0,
+    )
     if st.button("Analyze Emails"):
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -28,7 +48,8 @@ def analyze_emails_component(analyzer):
             )
 
         st.session_state.email_data = analyzer.get_sender_statistics(
-            progress_callback=update_progress
+            progress_callback=update_progress,
+            folder=get_selected_imap_folder(),
         )
 
         progress_bar.empty()
@@ -93,9 +114,16 @@ def sender_list_for_cleanup_component():
                 )
                 # TODO: move to bulk delete
                 for sender in sender_ids_to_be_cleaned:
-                    deleted_count = analyzer.delete_emails_from_sender(sender)
+                    deleted_count = analyzer.delete_emails_from_sender(
+                        sender, folder=get_selected_imap_folder()
+                    )
                     st.toast(f"Moved {deleted_count} emails from {sender} to the bin!")
-                st.session_state.email_data = None
+
+                # Remove deleted senders from the dataframe instead of clearing.
+                # Avoids forcing a full re-scan after every delete.
+                st.session_state.email_data = st.session_state.email_data[
+                    ~st.session_state.email_data["Email"].isin(sender_ids_to_be_cleaned)
+                ].reset_index(drop=True)
                 st.rerun()
 
 
@@ -135,8 +163,13 @@ def sidebar_component():
                     test_conn = analyzer.connect()
                     if test_conn:
                         test_conn.logout()
-                        st.success("Successfully connected to Gmail!")
+                        # Store domain so folder options can be scoped per provider
+                        st.session_state.domain = (
+                            st.session_state.email_address.lower().split("@")[-1]
+                        )
+                        st.session_state.scan_folder = "Inbox"
                         st.session_state.email_data = None
+                        st.success("Successfully connected!")
                         st.rerun()
 
         # Add a button to star the repository
@@ -160,6 +193,10 @@ def main():
         st.session_state.app_password = None
     if "email_data" not in st.session_state:
         st.session_state.email_data = None
+    if "domain" not in st.session_state:
+        st.session_state.domain = None
+    if "scan_folder" not in st.session_state:
+        st.session_state.scan_folder = "Inbox"
 
     # Sidebar for authentication
     sidebar_component()
@@ -182,7 +219,7 @@ def main():
         ### Instructions:
         1. Enter your Gmail or Yahoo address
         2. Enter your [Gmail App Password](https://myaccount.google.com/apppasswords) or [Yahoo App Password](https://help.yahoo.com/kb/SLN15241.html)
-        3. Select the number of recent emails to analyze
+        3. Select the folder to scan from the sidebar
         4. Click Connect to start analyzing your inbox
         
         **Note:** _This app requires a App Password, not your regular password_!
